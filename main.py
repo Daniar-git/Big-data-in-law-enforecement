@@ -1,38 +1,15 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DateType
-from pyspark.sql.functions import col, count, desc, asc, rank
-from pyspark.sql.window import Window
-schema = StructType([
-    StructField("Person", StringType(), True),
-    StructField("Action", StringType(), True),
-    StructField("Date", StringType(), True),
-    StructField("City", StringType(), True),
-    StructField("Gender", StringType(), True),
-    StructField("Age", IntegerType(), True),
-])
+import pandas as pd
+import numpy as np
+#used pandas only to load dataframe
+df = pd.read_csv('police_fatality_with_header.csv')
+age_intervals = [(0, 18), (18, 30), (30, 50), (50, 70), (70, np.inf)]
+age_labels = ['0-18', '18-30', '30-50', '50-70', '70+']
 
-spark = SparkSession.builder.appName("EndtermBDSpark").getOrCreate()
-path = "police_fatality_with_header.csv"
-df = spark.read.csv(path, header=True, schema=schema)
+df['Age Group'] = pd.cut(df['Age'], bins=[0, 18, 30, 50, 70, np.inf], labels=age_labels, right=False)
 
-action_counts = df.groupBy("City", "Action").count()
+percentage_by_state_and_age = df.groupby(['City', 'Age Group']).size().groupby(level=0).apply(
+    lambda x: 100 * x / float(x.sum())
+).unstack().fillna(0)
 
-windowSpecDesc = Window.partitionBy("City").orderBy(desc("count"))
-windowSpecAsc = Window.partitionBy("City").orderBy(asc("count"))
-
-ranked_actions_desc = action_counts.withColumn("rank_desc", rank().over(windowSpecDesc))
-ranked_actions_asc = action_counts.withColumn("rank_asc", rank().over(windowSpecAsc))
-
-#most popular death reason
-most_popular_actions = ranked_actions_desc.filter(col("rank_desc") == 1) \
-    .select("City", "Action", "count") \
-    .orderBy(desc("count"))
-#least popular death reason
-least_popular_actions = ranked_actions_asc.filter(col("rank_asc") == 1) \
-    .select("City", "Action", "count") \
-    .orderBy(asc("count"))
-
-print("Most Popular Actions by City (sorted by count descending):")
-most_popular_actions.show(truncate=False)
-print("Least Popular Actions by City (sorted by count ascending):")
-least_popular_actions.show(truncate=False)
+#save output as csv file
+percentage_by_state_and_age.to_csv('percentage_by_state_and_age.csv')
